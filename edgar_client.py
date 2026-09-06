@@ -11,7 +11,7 @@ import requests
 
 # SEC requires a descriptive User-Agent identifying the requester and a contact.
 # See https://www.sec.gov/os/webmaster-faq#developers
-SEC_USER_AGENT = "SEC-Filings-RAG research-tool gupta.s8@northeastern.edu"
+SEC_USER_AGENT = "EDGARQuery research-tool gupta.s8@northeastern.edu"
 
 TICKER_MAP_URL = "https://www.sec.gov/files/company_tickers.json"
 SUBMISSIONS_URL_TEMPLATE = "https://data.sec.gov/submissions/CIK{cik:010d}.json"

@@ -1,6 +1,6 @@
 # Build Progress
 
-Quick-glance status log for the SEC filings RAG system. One line of context per task.
+Quick-glance status log for the EDGARQuery system. One line of context per task.
 
 ## Phase 1: Foundation
 
