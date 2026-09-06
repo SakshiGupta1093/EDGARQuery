@@ -7,8 +7,8 @@ Quick-glance status log for the SEC filings RAG system. One line of context per 
 - [x] **Repo init** — `.gitignore`, `requirements.txt`, README stub.
 - [x] **SEC EDGAR client** — ticker→CIK lookup, list 10-K/10-Q filings with dates and document URLs.
 - [x] **Filing downloader** — fetch the primary document HTML for a filing and cache it locally under `data/raw/`.
-- [ ] **HTML→text extraction** — strip markup with BeautifulSoup/lxml, keep readable filing body text.
-- [ ] **Section segmentation** — split filings into named items (Item 1A Risk Factors, Item 7 MD&A, etc.).
+- [x] **HTML→text extraction** — strip markup with BeautifulSoup/lxml, keep readable filing body text.
+- [x] **Section segmentation** — isolate MD&A, Risk Factors, and Financial Statements by item heading.
 - [ ] **Chunking** — token-aware chunks with overlap, carrying filing/section metadata.
 - [ ] **Embeddings** — encode chunks with `bge-small-en-v1.5`.
 - [ ] **FAISS index** — build, persist, and reload the vector index with its metadata sidecar.
@@ -55,3 +55,5 @@ Quick-glance status log for the SEC filings RAG system. One line of context per 
 
 - **SEC submissions API over full-text search** — `data.sec.gov/submissions/CIK*.json` gives every filing for a company in one request, no pagination or scraping.
 - **Descriptive User-Agent with contact email** — SEC blocks requests without one; required by their developer policy.
+- **Section splitting on text, not the DOM** — filers use wildly different markup for headings, but the "Item N." text convention is mandated, so regex over extracted text is more portable than CSS/XPath selectors.
+- **Longest-span wins for duplicate item headings** — every filing repeats its headings in a table of contents; the real section is always the longest span between one heading and the next.
