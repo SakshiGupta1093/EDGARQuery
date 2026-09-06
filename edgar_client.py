@@ -1,9 +1,12 @@
-"""SEC EDGAR API client for discovering company filings.
+"""SEC EDGAR API client for discovering and downloading company filings.
 
-Provides lookup of a company's CIK by ticker and listing of its 10-K/10-Q
-filings (form type, filing date, and document URL) via SEC's submissions API.
-Downloading/parsing filing content is out of scope for this module.
+Provides lookup of a company's CIK by ticker, listing of its 10-K/10-Q
+filings (form type, filing date, and document URL) via SEC's submissions API,
+and download of a filing's raw document to local storage. Parsing filing
+content is out of scope for this module.
 """
+from pathlib import Path
+
 import requests
 
 # SEC requires a descriptive User-Agent identifying the requester and a contact.
@@ -15,6 +18,8 @@ SUBMISSIONS_URL_TEMPLATE = "https://data.sec.gov/submissions/CIK{cik:010d}.json"
 ARCHIVES_BASE_URL = "https://www.sec.gov/Archives/edgar/data"
 
 VALID_FORM_TYPES = {"10-K", "10-Q"}
+
+RAW_DATA_DIR = Path("data/raw")
 
 
 class EdgarClient:
@@ -78,3 +83,34 @@ class EdgarClient:
                 break
 
         return results
+
+    def download_filing(
+        self,
+        filing: dict,
+        dest_dir: Path = RAW_DATA_DIR,
+        overwrite: bool = False,
+    ) -> Path:
+        """Download a filing's raw document and return the local path.
+
+        `filing` is a dict as returned by `search_filings`. Files are named
+        `{ticker}_{form_type}_{filing_date}{ext}`, e.g. AAPL_10-K_2024-11-01.htm,
+        so a filing maps to exactly one path and can be re-used across runs.
+        Skips the network call if the file already exists unless `overwrite`.
+        """
+        dest_dir = Path(dest_dir)
+        dest_dir.mkdir(parents=True, exist_ok=True)
+
+        url = filing["url"]
+        # Preserve the source extension: primary documents are usually .htm,
+        # but older filings can be .txt and XBRL instance docs .xml.
+        extension = Path(url).suffix or ".htm"
+        filename = f"{filing['ticker']}_{filing['form_type']}_{filing['filing_date']}{extension}"
+        path = dest_dir / filename
+
+        if path.exists() and not overwrite:
+            return path
+
+        resp = self.session.get(url, timeout=30)
+        resp.raise_for_status()
+        path.write_bytes(resp.content)
+        return path

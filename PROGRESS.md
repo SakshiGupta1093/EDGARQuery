@@ -6,7 +6,7 @@ Quick-glance status log for the SEC filings RAG system. One line of context per 
 
 - [x] **Repo init** — `.gitignore`, `requirements.txt`, README stub.
 - [x] **SEC EDGAR client** — ticker→CIK lookup, list 10-K/10-Q filings with dates and document URLs.
-- [ ] **Filing downloader** — fetch the primary document HTML for a filing and cache it locally.
+- [x] **Filing downloader** — fetch the primary document HTML for a filing and cache it locally under `data/raw/`.
 - [ ] **HTML→text extraction** — strip markup with BeautifulSoup/lxml, keep readable filing body text.
 - [ ] **Section segmentation** — split filings into named items (Item 1A Risk Factors, Item 7 MD&A, etc.).
 - [ ] **Chunking** — token-aware chunks with overlap, carrying filing/section metadata.
