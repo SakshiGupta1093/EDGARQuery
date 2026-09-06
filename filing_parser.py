@@ -4,9 +4,11 @@ Filings are structured as numbered "Item" sections, but the item numbers mean
 different things in a 10-K than in a 10-Q, and every filing repeats its item
 headings in a table of contents. This module converts filing HTML to plain
 text, locates the real (non-TOC) item headings, and returns the sections we
-care about for retrieval: MD&A, Risk Factors, and Financial Statements.
+care about for retrieval: MD&A, Risk Factors, and Financial Statements,
+cleaned of the page furniture and table artifacts the conversion leaves behind.
 """
 import re
+import unicodedata
 import warnings
 from pathlib import Path
 
@@ -40,6 +42,50 @@ ITEM_HEADING_RE = re.compile(
 # this short is a cross-reference or TOC entry, not the section itself.
 MIN_SECTION_CHARS = 500
 
+# Typographic characters filers use that carry no meaning for retrieval but do
+# split tokens: "Company's" and "Company's" are different strings to an
+# embedding model and to any literal search over the text.
+UNICODE_REPLACEMENTS = {
+    "‘": "'", "’": "'", "‚": "'", "‛": "'",  # single quotes
+    "“": '"', "”": '"', "„": '"', "‟": '"',  # double quotes
+    "′": "'", "″": '"',                                 # prime marks
+    "–": "-", "—": "-", "―": "-", "−": "-",  # dashes/minus
+    "…": "...",
+    "•": "-", "·": "-", "●": "-", "▪": "-",  # bullets
+    "■": "-", "◦": "-", "⁃": "-",
+    "®": "", "™": "", "℠": "",                     # (R), (TM), (SM)
+    "​": "", "‌": "", "‍": "", "﻿": "",      # zero-width
+    "­": "",                                                 # soft hyphen
+}
+_UNICODE_RE = re.compile("|".join(map(re.escape, UNICODE_REPLACEMENTS)))
+
+# Every filer stamps a running header/footer onto each page, which survives the
+# HTML-to-text pass as a line stranded mid-sentence. These are the recurring
+# forms: "Apple Inc. | 2025 Form 10-K | 12", "Page 12 of 80", "- 12 -".
+#
+# Each pattern demands a trailing page number rather than just the words "Form
+# 10-K", so that prose about the filing ("...as described in this Form 10-K.")
+# survives. Bare "(4)" is deliberately *not* treated as a page marker: in a
+# financial table that is negative four, and dropping it corrupts the figure.
+BOILERPLATE_LINE_RES = [
+    re.compile(
+        r"^[^|]{0,60}\|[^|]{0,40}\bform\s+10-[kq]\b[^|]{0,20}\|\s*\d{1,4}$",
+        re.IGNORECASE,
+    ),
+    re.compile(r"^.{0,60}\bform\s+10-[kq]\b\s*[-|]?\s*\d{1,4}$", re.IGNORECASE),
+    re.compile(r"^page\s+\d{1,4}(\s+of\s+\d{1,4})?$", re.IGNORECASE),
+    re.compile(r"^-\s*\d{1,4}\s*-$"),
+    re.compile(r"^table\s+of\s+contents$", re.IGNORECASE),
+]
+
+# Table cells each become their own line, which strands a number's currency
+# symbol, percent sign, and negative-value parentheses on separate lines:
+# "$" / "416,161" / "6" / "%" instead of "$416,161" and "6%". Reattaching them
+# matters for more than tidiness - a "(" / "321" / ")" split that loses its
+# parentheses turns a negative number into a positive one.
+_ATTACH_FORWARD = {"$", "(", "$(", "("}
+_ATTACH_BACKWARD = {"%", ")", ")%", "%)"}
+
 
 def html_to_text(html: str | bytes) -> str:
     """Strip filing HTML down to normalized, line-structured plain text."""
@@ -55,6 +101,63 @@ def html_to_text(html: str | bytes) -> str:
     text = re.sub(r"[ \t]+", " ", text)
     # Collapse the runs of blank lines left behind by table/div markup.
     text = re.sub(r"\n[ \t]*\n+", "\n", text)
+    return text.strip()
+
+
+def normalize_unicode(text: str) -> str:
+    """Fold typographic and compatibility characters down to plain ASCII forms."""
+    # NFKC handles ligatures, full-width forms and superscripts ("ﬁ"->"fi",
+    # "²"->"2"); it leaves smart quotes and dashes alone, hence the table.
+    text = unicodedata.normalize("NFKC", text)
+    return _UNICODE_RE.sub(lambda m: UNICODE_REPLACEMENTS[m.group(0)], text)
+
+
+def _is_boilerplate(line: str) -> bool:
+    return any(pattern.match(line) for pattern in BOILERPLATE_LINE_RES)
+
+
+def _reflow_table_fragments(lines: list[str]) -> list[str]:
+    """Rejoin currency symbols, percent signs and parentheses to their number."""
+    out: list[str] = []
+    prefix = ""
+    for line in lines:
+        if line in _ATTACH_FORWARD:
+            prefix += line
+            continue
+        if line in _ATTACH_BACKWARD and out:
+            out[-1] += line
+            continue
+        out.append(prefix + line)
+        prefix = ""
+    if prefix:
+        out.append(prefix)
+    return out
+
+
+def clean_text(text: str) -> str:
+    """Normalize a parsed section into clean, retrieval-ready plain text.
+
+    Applies encoding normalization, drops page headers/footers left behind by
+    the HTML-to-text pass, rejoins numbers split across table cells, and
+    collapses the leftover whitespace.
+    """
+    text = normalize_unicode(text)
+
+    lines = []
+    for line in text.split("\n"):
+        line = re.sub(r"[ \t]+", " ", line).strip()
+        if not line or _is_boilerplate(line):
+            continue
+        lines.append(line)
+
+    lines = _reflow_table_fragments(lines)
+
+    text = "\n".join(lines)
+    # Spacing artifacts from the rejoin above and from filers' own markup.
+    text = re.sub(r"\(\s+", "(", text)
+    text = re.sub(r"\s+\)", ")", text)
+    text = re.sub(r"\s+([,;:.%])", r"\1", text)
+    text = re.sub(r"\$\s+", "$", text)
     return text.strip()
 
 
@@ -122,7 +225,9 @@ def parse_filing(html: str | bytes, form_type: str | None = None) -> dict[str, s
     for name, item_key in section_items.items():
         body = _extract_section(text, headings, item_key)
         if body is not None:
-            sections[name] = body
+            # Cleaning runs after segmentation, not before: heading detection
+            # depends on the line structure that cleaning collapses.
+            sections[name] = clean_text(body)
     return sections
 
 

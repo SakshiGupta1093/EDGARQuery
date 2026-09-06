@@ -9,6 +9,7 @@ Quick-glance status log for the EDGARQuery system. One line of context per task.
 - [x] **Filing downloader** — fetch the primary document HTML for a filing and cache it locally under `data/raw/`.
 - [x] **HTML→text extraction** — strip markup with BeautifulSoup/lxml, keep readable filing body text.
 - [x] **Section segmentation** — isolate MD&A, Risk Factors, and Financial Statements by item heading.
+- [x] **Text cleaning** — normalize encoding, drop page furniture, rejoin numbers split across table cells.
 - [ ] **Chunking** — token-aware chunks with overlap, carrying filing/section metadata.
 - [ ] **Embeddings** — encode chunks with `bge-small-en-v1.5`.
 - [ ] **FAISS index** — build, persist, and reload the vector index with its metadata sidecar.
@@ -57,3 +58,6 @@ Quick-glance status log for the EDGARQuery system. One line of context per task.
 - **Descriptive User-Agent with contact email** — SEC blocks requests without one; required by their developer policy.
 - **Section splitting on text, not the DOM** — filers use wildly different markup for headings, but the "Item N." text convention is mandated, so regex over extracted text is more portable than CSS/XPath selectors.
 - **Longest-span wins for duplicate item headings** — every filing repeats its headings in a table of contents; the real section is always the longest span between one heading and the next.
+- **Clean after segmentation, not before** — heading detection reads the line structure that cleaning collapses, so the two passes cannot be reordered.
+- **Page footers must carry a page number to be dropped** — matching bare "Form 10-K" would delete prose about the filing, and treating bare `(4)` as a page marker would silently turn negative four into nothing.
+- **Rejoin table cells rather than drop stray symbols** — `get_text` puts each cell on its own line, stranding `$`, `%` and the parentheses around negative numbers; dropping them would corrupt figures, so they are reattached to their number.
