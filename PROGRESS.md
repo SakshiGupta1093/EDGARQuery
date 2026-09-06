@@ -10,7 +10,7 @@ Quick-glance status log for the EDGARQuery system. One line of context per task.
 - [x] **HTML→text extraction** — strip markup with BeautifulSoup/lxml, keep readable filing body text.
 - [x] **Section segmentation** — isolate MD&A, Risk Factors, and Financial Statements by item heading.
 - [x] **Text cleaning** — normalize encoding, drop page furniture, rejoin numbers split across table cells.
-- [ ] **Chunking** — token-aware chunks with overlap, carrying filing/section metadata.
+- [x] **Chunking** — naive fixed-size window with overlap, carrying filing/section metadata and char offsets. Counts words, not model tokens; see the open question below.
 - [ ] **Embeddings** — encode chunks with `bge-small-en-v1.5`.
 - [ ] **FAISS index** — build, persist, and reload the vector index with its metadata sidecar.
 - [ ] **Retrieval** — top-k similarity search returning chunks plus source metadata.
@@ -61,3 +61,8 @@ Quick-glance status log for the EDGARQuery system. One line of context per task.
 - **Clean after segmentation, not before** — heading detection reads the line structure that cleaning collapses, so the two passes cannot be reordered.
 - **Page footers must carry a page number to be dropped** — matching bare "Form 10-K" would delete prose about the filing, and treating bare `(4)` as a page marker would silently turn negative four into nothing.
 - **Rejoin table cells rather than drop stray symbols** — `get_text` puts each cell on its own line, stranding `$`, `%` and the parentheses around negative numbers; dropping them would corrupt figures, so they are reattached to their number.
+- **Chunks are sliced by character offset, not rejoined from tokens** — every chunk is a verbatim substring of its section, so the stored offsets stay usable for citing back to the source.
+
+## Open Questions
+
+- **Chunk size is 500 *words*, but `bge-small-en-v1.5` caps input at 512 *wordpiece tokens*.** English prose runs ~1.3-1.5 wordpiece tokens per word, and filing tables full of figures run higher, so a 500-word chunk is likely ~650-750 tokens and would be silently truncated at embedding time — the tail of every chunk would never be indexed. Resolve before the embeddings step, either by dropping the window to ~350 words or by windowing on the real tokenizer. Needs measuring with the actual tokenizer rather than the estimate above.
