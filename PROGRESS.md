@@ -11,7 +11,7 @@ Quick-glance status log for the EDGARQuery system. One line of context per task.
 - [x] **Section segmentation** — isolate MD&A, Risk Factors, and Financial Statements by item heading.
 - [x] **Text cleaning** — normalize encoding, drop page furniture, rejoin numbers split across table cells.
 - [x] **Chunking** — naive fixed-size window with overlap, carrying filing/section metadata and char offsets. Counts words, not model tokens; see the open question below.
-- [ ] **Embeddings** — encode chunks with `bge-small-en-v1.5`.
+- [x] **Embeddings** — encode chunks with `bge-small-en-v1.5` into normalized 384-d vectors, warning when a chunk overruns the model's window.
 - [ ] **FAISS index** — build, persist, and reload the vector index with its metadata sidecar.
 - [ ] **Retrieval** — top-k similarity search returning chunks plus source metadata.
 - [ ] **Generation** — answer with `Qwen2.5-1.5B-Instruct` over retrieved context.
@@ -62,7 +62,20 @@ Quick-glance status log for the EDGARQuery system. One line of context per task.
 - **Page footers must carry a page number to be dropped** — matching bare "Form 10-K" would delete prose about the filing, and treating bare `(4)` as a page marker would silently turn negative four into nothing.
 - **Rejoin table cells rather than drop stray symbols** — `get_text` puts each cell on its own line, stranding `$`, `%` and the parentheses around negative numbers; dropping them would corrupt figures, so they are reattached to their number.
 - **Chunks are sliced by character offset, not rejoined from tokens** — every chunk is a verbatim substring of its section, so the stored offsets stay usable for citing back to the source.
+- **Vectors are L2-normalized at encode time** — inner product then equals cosine similarity, so the FAISS step can use a plain `IndexFlatIP` with no normalization pass of its own.
+- **Metadata drops the chunk text** — the vector is the searchable representation; carrying the text into the index sidecar too would duplicate the whole corpus.
+- **Query and document embeddings are separate calls** — bge is asymmetric and wants its instruction prefix on the query side only, so `embed_query` applies it and `embed_texts` does not.
+- **Truncation warns instead of raising** — a truncated embedding is still usable, just degraded, and failing the run would block the pipeline over a tuning problem.
 
 ## Open Questions
 
-- **Chunk size is 500 *words*, but `bge-small-en-v1.5` caps input at 512 *wordpiece tokens*.** English prose runs ~1.3-1.5 wordpiece tokens per word, and filing tables full of figures run higher, so a 500-word chunk is likely ~650-750 tokens and would be silently truncated at embedding time — the tail of every chunk would never be indexed. Resolve before the embeddings step, either by dropping the window to ~350 words or by windowing on the real tokenizer. Needs measuring with the actual tokenizer rather than the estimate above.
+- **The chunker's word-based window cannot respect the embedder's token limit.** Measured against `bge-small-en-v1.5` (512 wordpiece tokens) on the AAPL 10-K: at the current 500-word setting, 46 of 48 chunks overflow, mean 693 tokens, worst 1,165, with 9,069 tokens dropped in total. Shrinking the window does not fix it cleanly, because the tokens-per-word ratio swings from 1.17 on prose to 2.33 on number-dense tables:
+
+  | words | chunks | mean tokens | max tokens | over 512 |
+  |------:|-------:|------------:|-----------:|---------:|
+  | 500 | 48 | 693 | 1,165 | 46/48 |
+  | 350 | 68 | 489 | 830 | 21/68 |
+  | 250 | 95 | 351 | 612 | 6/95 |
+  | 200 | 118 | 284 | 509 | 0/118 |
+
+  Only 200 words eliminates overflow, and it wastes more than half the window on prose chunks. The real fix is to window on the model's tokenizer rather than on whitespace, so every chunk fills the budget without exceeding it. Worth doing as part of the Phase 2 chunking sweep rather than by picking a smaller word count.
