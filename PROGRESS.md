@@ -12,7 +12,7 @@ Quick-glance status log for the EDGARQuery system. One line of context per task.
 - [x] **Text cleaning** — normalize encoding, drop page furniture, rejoin numbers split across table cells.
 - [x] **Chunking** — naive fixed-size window with overlap, carrying filing/section metadata and char offsets. Counts words, not model tokens; see the open question below.
 - [x] **Embeddings** — encode chunks with `bge-small-en-v1.5` into normalized 384-d vectors, warning when a chunk overruns the model's window.
-- [ ] **FAISS index** — build, persist, and reload the vector index with its metadata sidecar.
+- [x] **FAISS index** — exact `IndexFlatIP` over the normalized vectors, saved to `data/index/` as `index.faiss` plus a `metadata.json` sidecar and reloaded bit-exactly.
 - [ ] **Retrieval** — top-k similarity search returning chunks plus source metadata.
 - [ ] **Generation** — answer with `Qwen2.5-1.5B-Instruct` over retrieved context.
 - [ ] **Citations** — attach filing, section, and URL to every claim in the answer.
@@ -66,6 +66,9 @@ Quick-glance status log for the EDGARQuery system. One line of context per task.
 - **Metadata drops the chunk text** — the vector is the searchable representation; carrying the text into the index sidecar too would duplicate the whole corpus.
 - **Query and document embeddings are separate calls** — bge is asymmetric and wants its instruction prefix on the query side only, so `embed_query` applies it and `embed_texts` does not.
 - **Truncation warns instead of raising** — a truncated embedding is still usable, just degraded, and failing the run would block the pipeline over a tuning problem.
+- **Flat exact index, not an approximate one** — `IndexFlatIP` needs no training and returns exact neighbours, so retrieval metrics measure the embeddings rather than an approximation's recall loss. Revisit only when the corpus outgrows brute force.
+- **Index and metadata are one object, never a loose pair** — row `i` of the index and entry `i` of the sidecar are the same chunk, and that correspondence is what makes a hit citable, so `VectorStore` owns both and refuses to construct if their lengths disagree.
+- **The sidecar records the embedding model** — querying an index with a different model than built it returns plausible nonsense rather than an error, so the model name is persisted and the query's dimension is checked on every search.
 
 ## Open Questions
 
