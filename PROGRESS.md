@@ -13,7 +13,7 @@ Quick-glance status log for the EDGARQuery system. One line of context per task.
 - [x] **Chunking** — naive fixed-size window with overlap, carrying filing/section metadata and char offsets. Counts words, not model tokens; see the open question below.
 - [x] **Embeddings** — encode chunks with `bge-small-en-v1.5` into normalized 384-d vectors, warning when a chunk overruns the model's window.
 - [x] **FAISS index** — exact `IndexFlatIP` over the normalized vectors, saved to `data/index/` as `index.faiss` plus a `metadata.json` sidecar and reloaded bit-exactly.
-- [ ] **Retrieval** — top-k similarity search returning chunks plus source metadata.
+- [x] **Retrieval** — top-k cosine search from a query string, returning hits with source metadata and chunk text sliced back out of the filing by offset.
 - [ ] **Generation** — answer with `Qwen2.5-1.5B-Instruct` over retrieved context.
 - [ ] **Citations** — attach filing, section, and URL to every claim in the answer.
 - [ ] **CLI** — end-to-end ask-a-question entry point.
@@ -69,6 +69,8 @@ Quick-glance status log for the EDGARQuery system. One line of context per task.
 - **Flat exact index, not an approximate one** — `IndexFlatIP` needs no training and returns exact neighbours, so retrieval metrics measure the embeddings rather than an approximation's recall loss. Revisit only when the corpus outgrows brute force.
 - **Index and metadata are one object, never a loose pair** — row `i` of the index and entry `i` of the sidecar are the same chunk, and that correspondence is what makes a hit citable, so `VectorStore` owns both and refuses to construct if their lengths disagree.
 - **The sidecar records the embedding model** — querying an index with a different model than built it returns plausible nonsense rather than an error, so the model name is persisted and the query's dimension is checked on every search.
+- **Hit text is sliced from the filing, not stored in the index** — the offsets recorded at chunk time already locate it, so the text and the citation come from one source and the index stays small. The cost is that the raw filings must still be on disk and must parse to the same text they did when indexed; both are checked, and a miss yields a hit with no text rather than a misattributed quotation.
+- **The retriever embeds queries with the index's model, not the library default** — taken from the sidecar, so a changed default cannot silently mismatch the query against the documents.
 
 ## Open Questions
 
@@ -82,3 +84,5 @@ Quick-glance status log for the EDGARQuery system. One line of context per task.
   | 200 | 118 | 284 | 509 | 0/118 |
 
   Only 200 words eliminates overflow, and it wastes more than half the window on prose chunks. The real fix is to window on the model's tokenizer rather than on whitespace, so every chunk fills the budget without exceeding it. Worth doing as part of the Phase 2 chunking sweep rather than by picking a smaller word count.
+
+- **Retrieval works but ranks factual lookups poorly, and truncation is not the reason.** "What risks does the company face from relying on single-source suppliers?" ranks three correct Risk Factors chunks at 0.72-0.77. But "Why did Greater China net sales decrease?" puts a raw segment table first and the chunk actually containing the answer second, and "How much cash did the company return through buybacks?" returns cash-flow and commercial-paper chunks rather than the repurchase disclosure. Truncation was the obvious suspect and it is wrong: the Greater China answer sits at token 406 of its chunk, inside the 512-token window the model reads. The likelier causes are 500-word chunks averaging several topics into one vector, and dense-only search being weak on numeric lookups. Both have Phase 2 tasks already — hybrid BM25 search and reranking — so measure there rather than guessing. Needs the Phase 3 eval set before any of it can be scored.
